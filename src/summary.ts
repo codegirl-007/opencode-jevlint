@@ -61,7 +61,8 @@ export function filterFindings(
 export function countBySeverity(findings: readonly Finding[]): Record<string, number> {
   const counts: Record<string, number> = {}
   for (const finding of findings) {
-    const key = finding.severity || "unknown"
+    // Normalize like `filterFindings` so counts are stable across casings.
+    const key = (finding.severity ?? "").trim().toLowerCase() || "unknown"
     counts[key] = (counts[key] ?? 0) + 1
   }
   return counts

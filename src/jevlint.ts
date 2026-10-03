@@ -61,6 +61,12 @@ export interface BinaryProbe {
   message: string
 }
 
+/** Result of the soft `jevlint doctor` probe. `ok` is true only on exit code 0. */
+export interface DoctorProbe {
+  ok: boolean
+  detail: string
+}
+
 /** Runtime state shared by the tool and the auto-check hook. */
 export interface JeVlintRuntime {
   options: JeVlintOptions
@@ -82,12 +88,12 @@ export interface BuildCheckArgsInput {
 /**
  * Build the argv for a check (excluding the binary itself).
  *
- * Shape: `check [--changed] --format json --concurrency 1 [--config X] [extraArgs] <paths...>`
+ * Shape: `check [--changed] --format json --concurrency <n> [--config X] [extraArgs] <paths...>`
  */
 export function buildCheckArgs(options: JeVlintOptions, input: BuildCheckArgsInput = {}): string[] {
   const args: string[] = ["check"]
   if (input.changed) args.push("--changed")
-  args.push("--format", "json", "--concurrency", "1")
+  args.push("--format", "json", "--concurrency", String(options.concurrency))
   if (options.config) args.push("--config", options.config)
   for (const extra of options.extraArgs) args.push(extra)
   for (const path of input.paths ?? []) {
@@ -440,14 +446,15 @@ export async function runCheck(
   options: JeVlintOptions,
   projectDir: string,
   paths: readonly string[],
-  extra: { changed?: boolean; signal?: AbortSignal } = {},
+  extra: { changed?: boolean; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<CheckOutcome> {
+  const timeoutMs = extra.timeoutMs ?? options.timeoutMs
   const args = buildCheckArgs(options, { paths, changed: extra.changed })
   const run = await runProcess({
     command: options.binary,
     args,
     cwd: projectDir,
-    timeoutMs: options.timeoutMs,
+    timeoutMs,
     signal: extra.signal,
   })
 
@@ -457,7 +464,7 @@ export async function runCheck(
   if (run.timedOut) {
     return {
       kind: "error",
-      message: `jevlint timed out after ${options.timeoutMs}ms`,
+      message: `jevlint timed out after ${timeoutMs}ms`,
       durationMs: run.durationMs,
     }
   }
@@ -562,4 +569,44 @@ export async function probeBinary(
     }
   }
   return { ok: true, version: result.version, message: result.version ? `jevlint ${result.version}` : "jevlint available" }
+}
+
+const DOCTOR_TIMEOUT_MS = 10_000
+
+/**
+ * Soft doctor probe: run `jevlint doctor --offline --json` and report whether
+ * config + credentials look healthy. `ok` is true only when the process exits 0.
+ *
+ * Never throws: any spawn/timeout/parse failure is reported as `ok: false` with
+ * a human-readable `detail`. The caller decides whether to warn + disable
+ * auto-check; the on-demand tool stays registered either way.
+ */
+export async function probeDoctor(
+  options: JeVlintOptions,
+  projectDir: string,
+  signal?: AbortSignal,
+): Promise<DoctorProbe> {
+  const args = ["doctor", "--offline", "--json"]
+  if (options.config) args.push("--config", options.config)
+
+  const run = await runProcess({
+    command: options.binary,
+    args,
+    cwd: projectDir,
+    timeoutMs: Math.min(options.timeoutMs, DOCTOR_TIMEOUT_MS),
+    signal,
+  })
+
+  if (run.spawnError) return { ok: false, detail: `could not run jevlint doctor: ${run.spawnError}` }
+  if (run.aborted) return { ok: false, detail: "jevlint doctor was cancelled" }
+  if (run.timedOut) return { ok: false, detail: "jevlint doctor timed out" }
+
+  const stderr = run.stderr.trim()
+  if (run.code === 0) {
+    return { ok: true, detail: "jevlint doctor reported a healthy config/credentials" }
+  }
+  return {
+    ok: false,
+    detail: stderr ? `jevlint doctor failed (exit ${run.code}): ${stderr}` : `jevlint doctor failed (exit ${run.code})`,
+  }
 }

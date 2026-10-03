@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "rule": "comment-quality",
+      "file": "examples/comment-quality/bad/narrates.ts",
+      "expect": "fail"
+    },
+    {
+      "rule": "comment-quality",
+      "file": "examples/comment-quality/good/rationale.ts",
+      "expect": "pass"
+    }
+  ]
+}

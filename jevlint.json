@@ -1,0 +1,45 @@
+{
+  "languages": {
+    "typescript": {}
+  },
+  "rules": [
+    {
+      "id": "swallowed-errors",
+      "description": "Fail errors or exceptions that are caught, ignored, or discarded without handling, logging, wrapping, or rethrowing. Intentional best-effort operations pass when the intent is clear.",
+      "severity": "error",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "src/**/*.ts"
+      ]
+    },
+    {
+      "id": "unnecessary-complexity",
+      "description": "The code is not unnecessarily complicated.",
+      "severity": "warning",
+      "kinds": [
+        "function",
+        "type"
+      ],
+      "include": [
+        "src/**/*.ts"
+      ]
+    },
+    {
+      "id": "comment-quality",
+      "description": "Comments must state a constraint, invariant, or rationale a reader cannot infer from the code. Fail comments that narrate development history or verification steps (for example \"verified in a live session\"), restate the identifier name, or describe what the following code does. JSDoc on exported symbols is not exempt.",
+      "severity": "warning",
+      "kinds": [
+        "comment",
+        "docComment"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/examples/**"
+      ]
+    }
+  ]
+}

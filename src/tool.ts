@@ -122,10 +122,8 @@ export const JE_VLINT_NAMESPACE = { name: "jevlint", description: "Run jevlint c
 /**
  * Register the `jevlint_check` tool.
  *
- * TODO(verify): the docs state a tool added under namespace `jevlint` with the
- * name `check` gets the effective id `jevlint_check` (unsupported characters
- * become `_`). That namespacing rule is documented but not runtime-verified
- * here; the literal name was chosen to match the documented behavior.
+ * Verified in a live OpenCode V2 session: a tool added under namespace
+ * `jevlint` with the name `check` is exposed to the model as `jevlint_check`.
  */
 export async function registerTool(ctx: Plugin.Context, runtime: JeVlintRuntime): Promise<void> {
   await ctx.tool.transform((editor) => {

@@ -11,9 +11,9 @@
 
 import { Plugin } from "@opencode/plugin"
 import { parseOptions } from "./options"
-import { probeBinary, type JeVlintRuntime } from "./jevlint"
+import { probeBinary, probeDoctor, type JeVlintRuntime } from "./jevlint"
 import { registerTool } from "./tool"
-import { registerHook } from "./hook"
+import { registerHook, shouldRegisterAutoCheck } from "./hook"
 
 export default Plugin.define({
   id: "opencode-jevlint",
@@ -45,9 +45,24 @@ export default Plugin.define({
       )
     }
 
+    // Detect + guide on credentials/config before enabling auto-check. A failed
+    // doctor run disables the hook so every edit does not get a noisy note, but
+    // the on-demand tool stays registered.
+    let doctorOk = true
+    if (runtime.binaryAvailable) {
+      const doctor = await probeDoctor(options, projectDir)
+      doctorOk = doctor.ok
+      if (!doctor.ok && options.autoCheck !== "off") {
+        console.warn(
+          `[opencode-jevlint] ${doctor.detail}. Auto-check is disabled; run \`jevlint doctor\` to fix ` +
+            "credentials/config. The jevlint_check tool is still available.",
+        )
+      }
+    }
+
     await registerTool(ctx, runtime)
 
-    if (options.autoCheck !== "off" && runtime.binaryAvailable) {
+    if (shouldRegisterAutoCheck(options, runtime.binaryAvailable, doctorOk)) {
       await registerHook(ctx, runtime)
     }
 

@@ -3,15 +3,16 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import reportFixture from "./fixtures/report.json"
-import { probeBinary, runCheck, type CheckOutcome } from "../src/jevlint"
+import { probeBinary, probeDoctor, runCheck, type CheckOutcome } from "../src/jevlint"
 import { parseOptions, type JeVlintOptions } from "../src/options"
 import {
   attachResultMetadata,
   debounceKey,
   discoverEditToolIds,
-  extractEditedPath,
+  extractEditedPaths,
   handleExecuteAfter,
   isEditTool,
+  shouldRegisterAutoCheck,
   type HookEventLike,
   type HookState,
 } from "../src/hook"
@@ -21,6 +22,8 @@ let okScript = ""
 let findingsScript = ""
 let errorScript = ""
 let missingScript = ""
+let doctorOkScript = ""
+let doctorBadScript = ""
 
 const reportJson = JSON.stringify(reportFixture)
 
@@ -54,12 +57,30 @@ async function makeExecutable(path: string, body: string): Promise<string> {
   return path
 }
 
+/** A binary whose `doctor --offline --json` subcommand exits with `doctorCode`. */
+function doctorScriptBody(doctorCode: number): string {
+  return `#!/usr/bin/env bash
+if [ "$1" = "version" ]; then
+  echo "jevlint v1.2.3"
+  exit 0
+fi
+if [ "$1" = "doctor" ]; then
+  echo '{"ok": true}'
+  ${doctorCode === 0 ? "exit 0" : `exit ${doctorCode}`}
+fi
+echo "unexpected args" 1>&2
+exit 2
+`
+}
+
 beforeAll(async () => {
   workDir = await mkdtemp(join(tmpdir(), "jevlint-plugin-test-"))
   okScript = await makeExecutable(join(workDir, "jevlint-ok"), reportScript(0))
   findingsScript = await makeExecutable(join(workDir, "jevlint-findings"), reportScript(1))
   errorScript = await makeExecutable(join(workDir, "jevlint-error"), errorScriptBody())
   missingScript = join(workDir, "jevlint-missing")
+  doctorOkScript = await makeExecutable(join(workDir, "jevlint-doctor-ok"), doctorScriptBody(0))
+  doctorBadScript = await makeExecutable(join(workDir, "jevlint-doctor-bad"), doctorScriptBody(2))
 })
 
 afterAll(async () => {
@@ -148,6 +169,38 @@ describe("jevlint process integration (fake binary)", () => {
     const outcome = await runCheck(optionsFor(missingScript), workDir, ["src/a.ts"])
     expect(outcome.kind).toBe("error")
   })
+
+  test("probeDoctor is ok when doctor exits 0", async () => {
+    const probe = await probeDoctor(optionsFor(doctorOkScript), workDir)
+    expect(probe.ok).toBe(true)
+    expect(probe.detail).toContain("healthy")
+  })
+
+  test("probeDoctor reports failure when doctor exits 2 without throwing", async () => {
+    const probe = await probeDoctor(optionsFor(doctorBadScript), workDir)
+    expect(probe.ok).toBe(false)
+    expect(probe.detail).toContain("exit 2")
+  })
+
+  test("probeDoctor passes --config through", async () => {
+    // The bad script only accepts `version`/`doctor`; with a config arg `$1` is
+    // still `doctor`, so this exercises the argument plumbing without hanging.
+    const probe = await probeDoctor(
+      parseOptions({ binary: doctorOkScript, config: "./jevlint.json", timeoutMs: 10_000 }).options,
+      workDir,
+    )
+    expect(probe.ok).toBe(true)
+  })
+})
+
+describe("auto-check registration decision", () => {
+  test("requires binary, doctor health, and a non-off mode", () => {
+    const on = parseOptions({ autoCheck: "file" }).options
+    expect(shouldRegisterAutoCheck(on, true, true)).toBe(true)
+    expect(shouldRegisterAutoCheck(on, false, true)).toBe(false)
+    expect(shouldRegisterAutoCheck(on, true, false)).toBe(false)
+    expect(shouldRegisterAutoCheck(parseOptions({ autoCheck: "off" }).options, true, true)).toBe(false)
+  })
 })
 
 describe("edit tool discovery", () => {
@@ -171,18 +224,38 @@ describe("edit tool discovery", () => {
 })
 
 describe("edited path extraction", () => {
-  test("reads top-level path keys", () => {
-    expect(extractEditedPath({ filePath: "src/a.ts" })).toBe("src/a.ts")
-    expect(extractEditedPath({ file_path: "a.py" })).toBe("a.py")
-    expect(extractEditedPath({ path: "b.go" })).toBe("b.go")
+  test("reads all top-level path keys", () => {
+    expect(extractEditedPaths({ filePath: "src/a.ts" })).toEqual(["src/a.ts"])
+    expect(extractEditedPaths({ file_path: "a.py" })).toEqual(["a.py"])
+    expect(extractEditedPaths({ path: "b.go" })).toEqual(["b.go"])
   })
-  test("reads nested multi-edit entries", () => {
-    expect(extractEditedPath({ edits: [{ filePath: "src/x.ts" }] })).toBe("src/x.ts")
-    expect(extractEditedPath({ files: ["src/y.ts"] })).toBe("src/y.ts")
+
+  test("reads nested multi-edit entries across several array keys", () => {
+    expect(extractEditedPaths({ edits: [{ filePath: "src/x.ts" }] })).toEqual(["src/x.ts"])
+    expect(extractEditedPaths({ files: ["src/y.ts"] })).toEqual(["src/y.ts"])
+    expect(
+      extractEditedPaths({
+        edits: [{ path: "src/a.ts" }, { target: "src/b.ts" }],
+        files: ["src/c.ts"],
+        changes: [{ filePath: "src/d.ts" }],
+      }),
+    ).toEqual(["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"])
   })
-  test("returns undefined when no path is present", () => {
-    expect(extractEditedPath({})).toBeUndefined()
-    expect(extractEditedPath(null)).toBeUndefined()
+
+  test("preserves order and de-duplicates exact strings", () => {
+    expect(
+      extractEditedPaths({
+        filePath: "src/a.ts",
+        edits: [{ path: "src/a.ts" }, { path: "src/b.ts" }, "src/a.ts"],
+        files: ["src/b.ts", "src/c.ts"],
+      }),
+    ).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"])
+  })
+
+  test("returns an empty list when no path is present", () => {
+    expect(extractEditedPaths({})).toEqual([])
+    expect(extractEditedPaths(null)).toEqual([])
+    expect(extractEditedPaths({ edits: [null, 3, {}] })).toEqual([])
   })
 })
 
@@ -210,10 +283,15 @@ describe("debounce key", () => {
   test("is stable for identical path and content", () => {
     const now = 1_000_000
     expect(debounceKey("a.ts", { newString: "x" }, now)).toBe(debounceKey("a.ts", { newString: "x" }, now))
+    expect(debounceKey(["a.ts"], { newString: "x" }, now)).toBe(debounceKey(["a.ts"], { newString: "x" }, now))
   })
   test("changes when content changes", () => {
     const now = 1_000_000
     expect(debounceKey("a.ts", { newString: "x" }, now)).not.toBe(debounceKey("a.ts", { newString: "y" }, now))
+  })
+  test("changes when the path list changes", () => {
+    const now = 1_000_000
+    expect(debounceKey(["a.ts"], { newString: "x" }, now)).not.toBe(debounceKey(["a.ts", "b.ts"], { newString: "x" }, now))
   })
   test("buckets by time when content is absent", () => {
     expect(debounceKey("a.ts", {}, 0)).not.toBe(debounceKey("a.ts", {}, 6_000))
@@ -289,6 +367,66 @@ describe("handleExecuteAfter", () => {
     )
     expect(seen?.changed).toBe(true)
     expect(seen?.paths).toEqual([])
+  })
+
+  test("checks every edited file in a batched edit, resolving and de-duplicating", async () => {
+    let seen: readonly string[] | undefined
+    const options = optionsFor(findingsScript)
+    const state: HookState = {
+      options,
+      projectDir: workDir,
+      binaryAvailable: true,
+      editToolIds: new Set(["edit"]),
+      debounce: new Map(),
+      runCheck: async (paths) => {
+        seen = paths
+        return {
+          kind: "ok",
+          exitCode: 1,
+          durationMs: 1,
+          report: { scannedFiles: 1, codeUnits: 0, evaluations: 0, findings: [] },
+        }
+      },
+    }
+    await handleExecuteAfter(
+      {
+        tool: "multiedit",
+        status: "completed",
+        input: {
+          edits: [{ filePath: "src/a.ts" }, { filePath: "src/b.ts" }],
+          files: ["src/c.ts", "src/a.ts"],
+        },
+        result: {},
+      },
+      state,
+    )
+    expect(seen).toEqual([join(workDir, "src/a.ts"), join(workDir, "src/b.ts"), join(workDir, "src/c.ts")])
+  })
+
+  test("passes autoCheckTimeoutMs to the auto-check runCheck", async () => {
+    let seenTimeout: number | undefined
+    const options = parseOptions({ binary: findingsScript, autoCheckTimeoutMs: 1_234 }).options
+    const state: HookState = {
+      options,
+      projectDir: workDir,
+      binaryAvailable: true,
+      editToolIds: new Set(["edit"]),
+      debounce: new Map(),
+      runCheck: async (_paths, extra) => {
+        seenTimeout = extra?.timeoutMs
+        return {
+          kind: "ok",
+          exitCode: 0,
+          durationMs: 1,
+          report: { scannedFiles: 1, codeUnits: 0, evaluations: 0, findings: [] },
+        }
+      },
+    }
+    await handleExecuteAfter(
+      { tool: "edit", status: "completed", input: { filePath: "src/a.ts", newString: "t" }, result: {} },
+      state,
+    )
+    expect(seenTimeout).toBe(1_234)
   })
 
   test("ignores non-edit tools, errored tools and inputs without a path", async () => {

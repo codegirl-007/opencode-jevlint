@@ -1,7 +1,7 @@
 /**
  * Auto-check hook.
  *
- * After an edit tool completes, run jevlint on the edited file (file-scoped)
+ * After an edit tool completes, run jevlint on all edited files (file-scoped)
  * and attach a bounded findings summary to the tool result. All failures are
  * swallowed and reported as a one-line note instead.
  */
@@ -13,10 +13,10 @@ import { summarize, summarizeError } from "./summary"
 /**
  * Built-in edit tool names we recognize even before inspecting schemas.
  *
- * TODO(verify): exact built-in edit tool ids and their input field names. The
- * docs describe `ctx.tool.list()` but do not enumerate built-ins; these names
- * plus the schema fallback are defensive guesses, confirmed only against the
- * installed `@opencode/plugin`/schema types (which describe shapes, not ids).
+ * Verified in a live OpenCode V2 session: the built-in `write` tool reports id
+ * `write` with input key `filePath` and triggers the hook. The remaining names
+ * plus the schema fallback stay as defensive coverage for `edit`/multi-edit
+ * variants and custom tools.
  */
 export const KNOWN_EDIT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "edit",
@@ -81,6 +81,9 @@ export const PATH_KEYS: readonly string[] = [
   "targetFile",
 ]
 
+/** Array input keys that may hold multiple edited paths or multi-edit entries. */
+export const PATH_ARRAY_KEYS: readonly string[] = ["edits", "files", "changes", "paths", "targets"]
+
 /** Candidate input keys that may hold the new content, used for debouncing. */
 const CONTENT_KEYS: readonly string[] = [
   "content",
@@ -143,27 +146,40 @@ export function isEditTool(name: string, editToolIds: ReadonlySet<string>): bool
   return KNOWN_EDIT_TOOL_NAMES.has(name.toLowerCase())
 }
 
-/** Extract the first plausible edited path from a tool input object. */
-export function extractEditedPath(input: unknown): string | undefined {
-  if (!isRecord(input)) return undefined
-  for (const key of PATH_KEYS) {
-    const value = input[key]
-    if (typeof value === "string" && value.length > 0) return value
+/**
+ * Extract every plausible edited path from a tool input object.
+ *
+ * Collects all values under `PATH_KEYS` plus string entries nested in the
+ * array keys (`edits`, `files`, `changes`, `paths`, `targets`), recursing into
+ * array items. Order is preserved and exact-string duplicates are dropped
+ * (case-sensitive; the first occurrence wins).
+ */
+export function extractEditedPaths(input: unknown): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  const add = (value: unknown) => {
+    if (typeof value !== "string" || value.length === 0) return
+    if (seen.has(value)) return
+    seen.add(value)
+    out.push(value)
   }
-  // Multi-file edits: `edits`, `files`, `changes`, `paths` arrays of objects/strings.
-  for (const key of ["edits", "files", "changes", "paths", "targets"]) {
-    const value = input[key]
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === "string" && item.length > 0) return item
-        if (isRecord(item)) {
-          const nested = extractEditedPath(item)
-          if (nested) return nested
-        }
+
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 8 || !isRecord(value)) return
+    for (const key of PATH_KEYS) add(value[key])
+    for (const key of PATH_ARRAY_KEYS) {
+      const entry = value[key]
+      if (!Array.isArray(entry)) continue
+      for (const item of entry) {
+        if (typeof item === "string") add(item)
+        else if (isRecord(item)) visit(item, depth + 1)
       }
     }
   }
-  return undefined
+
+  visit(input, 0)
+  return out
 }
 
 function collectContent(value: unknown, depth = 0): string {
@@ -190,10 +206,11 @@ export function hashString(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0")
 }
 
-export function debounceKey(path: string, input: unknown, now = Date.now()): string {
+export function debounceKey(paths: readonly string[] | string, input: unknown, now = Date.now()): string {
+  const pathKey = typeof paths === "string" ? paths : paths.join("\u0000")
   const content = collectContent(input)
   const suffix = content.length > 0 ? hashString(content) : `t${Math.floor(now / NO_CONTENT_BUCKET_MS)}`
-  return hashString(`${path}\u0000${suffix}`)
+  return hashString(`${pathKey}\u0000${suffix}`)
 }
 
 function pruneDebounce(debounce: Map<string, number>, now: number): void {
@@ -223,16 +240,32 @@ export interface HookState extends JeVlintRuntime {
   debounce: Map<string, number>
   runCheck: (
     paths: readonly string[],
-    options: { changed?: boolean; signal?: AbortSignal },
+    options: { changed?: boolean; signal?: AbortSignal; timeoutMs?: number },
   ) => Promise<CheckOutcome>
+}
+
+/**
+ * Decide whether to register the auto-check hook.
+ *
+ * Auto-check requires the binary to be available AND `jevlint doctor` to report
+ * a healthy config/credentials setup. The on-demand `jevlint_check` tool is
+ * registered regardless; this only gates the hook, so a missing credential or
+ * config does not produce a noisy note on every edit.
+ */
+export function shouldRegisterAutoCheck(
+  options: Pick<JeVlintRuntime["options"], "autoCheck">,
+  binaryAvailable: boolean,
+  doctorOk: boolean,
+): boolean {
+  return options.autoCheck !== "off" && binaryAvailable && doctorOk
 }
 
 /**
  * Merge a `jevlint` metadata block (and optional note) into a tool result.
  *
- * TODO(verify): whether `result.metadata` is surfaced to the model or only to
- * the UI. We also append the summary to `result.content` because that is the
- * documented tool output field and is definitely shown to the model.
+ * Verified in a live OpenCode V2 session: appending to `result.content` is what
+ * surfaces the summary to the model, so the note is always added there; the
+ * structured `metadata.jevlint` block is attached alongside it.
  */
 export function attachResultMetadata(
   result: unknown,
@@ -265,20 +298,21 @@ export async function handleExecuteAfter(event: HookEventLike, state: HookState)
     const tool = typeof event.tool === "string" ? event.tool : ""
     if (!tool || !isEditTool(tool, state.editToolIds)) return
 
-    const editedPath = extractEditedPath(event.input)
-    if (!editedPath) return
+    const editedPaths = extractEditedPaths(event.input)
+    if (editedPaths.length === 0) return
 
     const now = Date.now()
-    const key = debounceKey(editedPath, event.input, now)
+    const key = debounceKey(editedPaths, event.input, now)
     if (state.debounce.has(key)) return
     state.debounce.set(key, now)
     pruneDebounce(state.debounce, now)
 
-    const absolute = toAbsolutePath(editedPath, state.projectDir)
     const outcome =
       state.options.autoCheck === "changed"
         ? await state.runCheck([], { changed: true })
-        : await state.runCheck([absolute], {})
+        : await state.runCheck(editedPaths.map((path) => toAbsolutePath(path, state.projectDir)), {
+            timeoutMs: state.options.autoCheckTimeoutMs,
+          })
 
     if (outcome.kind === "ok") {
       const summary = summarize(outcome.report, { maxFindings: state.options.maxFindings })
@@ -307,7 +341,7 @@ export async function registerHook(ctx: Plugin.Context, runtime: JeVlintRuntime)
     ...runtime,
     editToolIds,
     debounce: new Map<string, number>(),
-    runCheck: (paths, options) => runCheck(runtime.options, runtime.projectDir, paths, options),
+    runCheck: (paths, extra) => runCheck(runtime.options, runtime.projectDir, paths, extra),
   }
 
   await ctx.tool.hook("execute.after", async (event) => {
