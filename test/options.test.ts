@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   compareVersions,
+  DEFAULT_AUTO_CHECK_TIMEOUT_MS,
+  DEFAULT_CONCURRENCY,
   DEFAULT_MAX_FINDINGS,
   DEFAULT_TIMEOUT_MS,
   parseOptions,
@@ -16,11 +18,20 @@ describe("parseOptions", () => {
       autoCheck: "file",
       config: undefined,
       timeoutMs: DEFAULT_TIMEOUT_MS,
+      autoCheckTimeoutMs: DEFAULT_AUTO_CHECK_TIMEOUT_MS,
+      concurrency: DEFAULT_CONCURRENCY,
       maxFindings: DEFAULT_MAX_FINDINGS,
       severity: [],
       extraArgs: [],
       minimumVersion: undefined,
     })
+  })
+
+  test("defaults timeoutMs to 30s and autoCheckTimeoutMs to 10s", () => {
+    const { options } = parseOptions({})
+    expect(options.timeoutMs).toBe(30_000)
+    expect(options.autoCheckTimeoutMs).toBe(10_000)
+    expect(options.concurrency).toBe(1)
   })
 
   test("reads valid values", () => {
@@ -29,6 +40,8 @@ describe("parseOptions", () => {
       autoCheck: "changed",
       config: "./jevlint.json",
       timeoutMs: 5000,
+      autoCheckTimeoutMs: 2000,
+      concurrency: 4,
       maxFindings: 3,
       severity: ["error", "warning"],
       extraArgs: ["--refresh-cache"],
@@ -39,6 +52,8 @@ describe("parseOptions", () => {
     expect(options.autoCheck).toBe("changed")
     expect(options.config).toBe("./jevlint.json")
     expect(options.timeoutMs).toBe(5000)
+    expect(options.autoCheckTimeoutMs).toBe(2000)
+    expect(options.concurrency).toBe(4)
     expect(options.maxFindings).toBe(3)
     expect(options.severity).toEqual(["error", "warning"])
     expect(options.extraArgs).toEqual(["--refresh-cache"])
@@ -55,6 +70,8 @@ describe("parseOptions", () => {
       binary: "",
       autoCheck: "sometimes",
       timeoutMs: -1,
+      autoCheckTimeoutMs: 0,
+      concurrency: 1.5,
       maxFindings: "many",
       severity: 42,
       extraArgs: 42,
@@ -62,10 +79,12 @@ describe("parseOptions", () => {
     expect(options.binary).toBe("jevlint")
     expect(options.autoCheck).toBe("file")
     expect(options.timeoutMs).toBe(DEFAULT_TIMEOUT_MS)
+    expect(options.autoCheckTimeoutMs).toBe(DEFAULT_AUTO_CHECK_TIMEOUT_MS)
+    expect(options.concurrency).toBe(DEFAULT_CONCURRENCY)
     expect(options.maxFindings).toBe(DEFAULT_MAX_FINDINGS)
     expect(options.severity).toEqual([])
     expect(options.extraArgs).toEqual([])
-    expect(warnings.length).toBeGreaterThanOrEqual(6)
+    expect(warnings.length).toBeGreaterThanOrEqual(8)
   })
 
   test("never throws on non-object input", () => {

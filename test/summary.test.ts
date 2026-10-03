@@ -32,6 +32,20 @@ describe("parseReport (contract fixture)", () => {
     expect(result.ok).toBe(true)
   })
 
+  test("parses a report preceded by multiple non-JSON log lines", () => {
+    const noisy = [
+      "jevlint 1.2.3",
+      "[info] loading config",
+      "[warn] not a real object: still text",
+      JSON.stringify(reportFixture),
+    ].join("\n")
+    const result = parseReport(noisy)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.report.findings).toHaveLength(3)
+    expect(result.report.findings[0]?.ruleId).toBe("no-todo-comments")
+  })
+
   test("reports errors instead of throwing", () => {
     expect(parseReport("").ok).toBe(false)
     expect(parseReport("not json").ok).toBe(false)
@@ -87,5 +101,15 @@ describe("summary", () => {
 
   test("countBySeverity handles unknown severities", () => {
     expect(countBySeverity([{ severity: "" } as never])).toEqual({ unknown: 1 })
+  })
+
+  test("countBySeverity normalizes casing and whitespace", () => {
+    expect(
+      countBySeverity([
+        { severity: "Error" } as never,
+        { severity: " error " } as never,
+        { severity: "WARNING" } as never,
+      ]),
+    ).toEqual({ error: 2, warning: 1 })
   })
 })

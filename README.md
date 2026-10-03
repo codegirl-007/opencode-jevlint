@@ -85,7 +85,9 @@ Never commit these values. The plugin does not persist them anywhere.
 | `binary` | `string` | `"jevlint"` | Explicit path to the `jevlint` binary, or a command name resolved on `PATH`. |
 | `autoCheck` | `"off" \| "file" \| "changed"` | `"file"` | When to auto-run after edits. `"off"` disables the hook; `"file"` checks only the edited file; `"changed"` checks working-copy changes. |
 | `config` | `string` | – | Passed as `--config <path>` to `jevlint check`. |
-| `timeoutMs` | `number` | `60000` | Hard timeout for one `jevlint` invocation. |
+| `timeoutMs` | `number` | `30000` | Hard timeout for one on-demand `jevlint` invocation (the `jevlint_check` tool). |
+| `autoCheckTimeoutMs` | `number` | `10000` | Shorter timeout for the synchronous auto-check hook. Bounds how much latency the hook may add to an edit result. |
+| `concurrency` | `number` | `1` | Number of parallel workers, passed as `--concurrency <n>` to `jevlint check`. |
 | `maxFindings` | `number` | `20` | Maximum number of findings embedded in a summary. |
 | `severity` | `string[]` or comma string | `[]` (all) | Severity allow-list for reported findings, e.g. `["error", "warning"]`. |
 | `extraArgs` | `string[]` | `[]` | Extra raw arguments appended to `jevlint check` before the paths, e.g. `["--refresh-cache"]`. |
@@ -110,22 +112,35 @@ The result contains a bounded text summary and structured `metadata.jevlint` (`o
 Under the hood the plugin runs:
 
 ```sh
-jevlint check --format json --concurrency 1 [--config <path>] [extraArgs] <paths...>
+jevlint check --format json --concurrency <n> [--config <path>] [extraArgs] <paths...>
 ```
 
-Exit code `0` (no findings) and `1` (findings) are both treated as success; exit code `2`, a timeout, a missing
+`<n>` is the `concurrency` option (default `1`). Exit code `0` (no findings) and `1` (findings) are both treated as success; exit code `2`, a timeout, a missing
 binary, or unparseable JSON is reported softly and never breaks the session.
 
 ## Auto-check behavior
 
+Auto-check is **detect + guide**: it only registers the hook when the binary is available *and*
+`jevlint doctor --offline --json` exits `0` (config + credentials look healthy). If the doctor probe fails, setup logs
+a single warning and skips the hook so you do not get a noisy note on every edit; the `jevlint_check` tool stays
+registered.
+
 Unless `autoCheck` is `"off"`, the plugin registers an `execute.after` tool hook. When a completed tool call looks like
-an edit, the plugin extracts the edited path from the tool input (checking several candidate keys, including nested
-multi-file edits), runs a file-scoped check, and:
+an edit, the plugin extracts **all** edited paths from the tool input (checking several candidate keys and nested
+multi-file entries, preserving order and de-duplicating), runs the check, and:
 
 - adds a `jevlint` block to the tool result's `metadata`, and
 - appends a short text note to the result content when there are findings (or a one-line note if the check failed).
 
-Identical `path + content` checks are debounced in memory to avoid repeated runs on the same edit. All hook work is
+The hook is **synchronous and additive**: because `execute.after` is awaited, the edit result waits for the check. The
+`autoCheckTimeoutMs` option (default `10000`) bounds that added latency; when the check times out the result gets a
+one-line error note instead of findings. The on-demand tool uses the longer `timeoutMs` (default `30000`).
+
+In `"file"` mode the plugin passes every edited file to a single `jevlint check` invocation. In `"changed"` mode it
+passes `--changed` and no paths, which asks jevlint to check the whole working copy on *every* edit; that mode requires
+a git repository and is considerably more expensive than `"file"`.
+
+Identical `paths + content` checks are debounced in memory to avoid repeated runs on the same edit. All hook work is
 wrapped so a failure can never surface out of the hook.
 
 ## Limitations
@@ -134,8 +149,9 @@ wrapped so a failure can never surface out of the hook.
   credentials are configured. It does not bundle, download, or auto-update `jevlint`.
 - **Detection, not installation.** A missing or too-old binary disables auto-check; the on-demand tool reports the
   problem but cannot fix it.
-- **File-scoped auto-check.** `autoCheck: "file"` checks only the edited file; use the `jevlint_check` tool or
-  `autoCheck: "changed"` for broader coverage.
+- **Bounded auto-check.** `autoCheck: "file"` checks only the files the edit touched (all of them for a batched edit)
+  and is bounded by `autoCheckTimeoutMs`. `autoCheck: "changed"` checks the whole working copy on every edit, requires
+  a git repository, and is more expensive; use the `jevlint_check` tool for broader coverage on demand.
 - **Best-effort edit detection.** Edit tools are recognized by known names and, for custom tools, by their input
   schema. An unusual custom tool may not be detected.
 - **V2 only.** There is intentionally no V1 `server()` export.

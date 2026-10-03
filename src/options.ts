@@ -15,8 +15,17 @@ export interface JeVlintOptions {
   autoCheck: AutoCheckMode
   /** Optional `--config` path passed to `jevlint check`. */
   config?: string
-  /** Hard timeout for a single jevlint invocation, in milliseconds. */
+  /** Hard timeout for one on-demand `jevlint` invocation, in milliseconds. */
   timeoutMs: number
+  /**
+   * Shorter timeout for the synchronous auto-check hook, in milliseconds.
+   *
+   * The hook is awaited, so this bounds how much latency it may add to an edit
+   * result. Independent from `timeoutMs` (used by the on-demand tool).
+   */
+  autoCheckTimeoutMs: number
+  /** Number of parallel workers, passed as `--concurrency`. Defaults to `1`. */
+  concurrency: number
   /** Maximum number of findings embedded in a summary. */
   maxFindings: number
   /** Optional severity allow-list for reported findings (empty = all). */
@@ -32,8 +41,10 @@ export interface ParsedOptions {
   warnings: string[]
 }
 
-export const DEFAULT_TIMEOUT_MS = 60_000
+export const DEFAULT_TIMEOUT_MS = 30_000
+export const DEFAULT_AUTO_CHECK_TIMEOUT_MS = 10_000
 export const DEFAULT_MAX_FINDINGS = 20
+export const DEFAULT_CONCURRENCY = 1
 
 const AUTO_CHECK_MODES: readonly AutoCheckMode[] = ["off", "file", "changed"]
 
@@ -122,6 +133,13 @@ export function parseOptions(raw: unknown): ParsedOptions {
   }
 
   const timeoutMs = parsePositiveInt(input.timeoutMs, DEFAULT_TIMEOUT_MS, warnings, "timeoutMs")
+  const autoCheckTimeoutMs = parsePositiveInt(
+    input.autoCheckTimeoutMs,
+    DEFAULT_AUTO_CHECK_TIMEOUT_MS,
+    warnings,
+    "autoCheckTimeoutMs",
+  )
+  const concurrency = parsePositiveInt(input.concurrency, DEFAULT_CONCURRENCY, warnings, "concurrency")
   const maxFindings = parseNonNegativeInt(input.maxFindings, DEFAULT_MAX_FINDINGS, warnings, "maxFindings")
   const severity = parseStringList(input.severity, warnings, "severity")
   const extraArgs = parseStringList(input.extraArgs, warnings, "extraArgs")
@@ -138,6 +156,8 @@ export function parseOptions(raw: unknown): ParsedOptions {
       autoCheck,
       config,
       timeoutMs,
+      autoCheckTimeoutMs,
+      concurrency,
       maxFindings,
       severity,
       extraArgs,

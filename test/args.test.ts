@@ -55,6 +55,18 @@ describe("buildCheckArgs", () => {
       "src/a.ts",
     ])
   })
+
+  test("uses the configured concurrency flag", () => {
+    const options = opts({ concurrency: 4 })
+    expect(buildCheckArgs(options, { paths: ["src"] })).toEqual([
+      "check",
+      "--format",
+      "json",
+      "--concurrency",
+      "4",
+      "src",
+    ])
+  })
 })
 
 describe("toAbsolutePath", () => {

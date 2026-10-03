@@ -3,7 +3,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import reportFixture from "./fixtures/report.json"
-import { executeTool, parseToolInput } from "../src/tool"
+import { executeTool, parseToolInput, registerTool } from "../src/tool"
 import { parseOptions } from "../src/options"
 import type { JeVlintRuntime } from "../src/jevlint"
 
@@ -84,5 +84,48 @@ describe("executeTool", () => {
     const result = await executeTool(bad, { paths: ["src"] })
     expect(result.metadata.jevlint.ok).toBe(false)
     expect(result.content).toContain("jevlint:")
+  })
+})
+
+describe("registerTool wiring", () => {
+  interface CapturedEditor {
+    namespaceName?: string
+    added: Array<{ name: string; options?: { namespace?: string } }>
+  }
+
+  function stubCtx(): { ctx: Parameters<typeof registerTool>[0]; captured: CapturedEditor } {
+    const captured: CapturedEditor = { added: [] }
+    const editor = {
+      list: () => [],
+      get: () => undefined,
+      namespace: (ns: { name: string }) => {
+        captured.namespaceName = ns.name
+      },
+      add: (tool: { name: string; options?: { namespace?: string } }) => {
+        captured.added.push(tool)
+      },
+      update: () => {},
+      remove: () => {},
+    }
+    const ctx = {
+      tool: {
+        transform: async (callback: (input: typeof editor) => void) => {
+          callback(editor)
+          return { dispose: async () => {} }
+        },
+      },
+    } as unknown as Parameters<typeof registerTool>[0]
+    return { ctx, captured }
+  }
+
+  // TODO(verify): the effective OpenCode V2 tool id must be confirmed in a live
+  // session. The docs say namespace `jevlint` + name `check` renders as
+  // `jevlint_check`; we assert the registered namespace/name here.
+  test("registers namespace `jevlint` with a tool named `check`", async () => {
+    const { ctx, captured } = stubCtx()
+    await registerTool(ctx, runtime())
+    expect(captured.namespaceName).toBe("jevlint")
+    expect(captured.added.map((tool) => tool.name)).toEqual(["check"])
+    expect(captured.added[0]?.options?.namespace).toBe("jevlint")
   })
 })

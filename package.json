@@ -5,6 +5,16 @@
   "type": "module",
   "description": "OpenCode V2 plugin that wraps the jevlint CLI: an on-demand jevlint_check tool plus bounded auto-checks after edits.",
   "license": "MIT",
+  "author": "codegirl-007",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codegirl-007/opencode-jevlint.git"
+  },
+  "homepage": "https://github.com/codegirl-007/opencode-jevlint#readme",
+  "bugs": {
+    "url": "https://github.com/codegirl-007/opencode-jevlint/issues"
+  },
+  "types": "./src/index.ts",
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -29,7 +39,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@opencode/plugin": "latest"
+    "@opencode/plugin": "^2.0.22"
   },
   "devDependencies": {
     "@types/bun": "latest",
