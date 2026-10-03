@@ -44,6 +44,24 @@ Then add it to `opencode.jsonc`. Use the object form to pass options:
 Plugins in `.opencode/plugins/` are loaded automatically; a published package such as this one must be listed under
 `plugins` as shown above.
 
+### Load a local checkout
+
+A `plugins` entry may point at a local directory instead of an npm package. The loader resolves `<directory>/server`
+then `<directory>/index` and does **not** consult `package.json` `exports`, so point at the directory that actually
+contains `index.ts` — here, `src`:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    { "package": "/absolute/path/to/opencode-jevlint/src", "options": { "autoCheck": "file" } }
+  ]
+}
+```
+
+Pointing at the repository root will not load (the entry lives in `src/index.ts`); use the `src` directory, or add a
+root `index.ts` that re-exports `./src/index`. Relative paths resolve from the config file containing the entry.
+
 ## Install the `jevlint` binary
 
 Pick one of:
@@ -72,11 +90,22 @@ registered and returns a short note explaining how to fix it.
 
 Set these in the environment that launches OpenCode. The plugin reads neither key nor config; `jevlint` does.
 
-- `TYPESAFE_API_KEY`, **or**
-- `JEVLINT_PROVIDER=cloudflare` together with
-  `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AUTH_TOKEN`.
+- `TYPESAFE_API_KEY` — the default Jev/TypeSafe provider, **or**
+- `JEVLINT_PROVIDER=openrouter` together with `OPENROUTER_API_KEY` (optional: `OPENROUTER_MODEL`,
+  `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`), **or**
+- `JEVLINT_PROVIDER=cloudflare` together with `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AUTH_TOKEN`
+  (or `CLOUDFLARE_API_TOKEN`; optional `CLEF_MODEL`).
 
 Never commit these values. The plugin does not persist them anywhere.
+
+OpenCode's background service captures its environment **when it starts**, so after changing credentials restart it
+from a shell that has the new values:
+
+```sh
+opencode service restart
+```
+
+A change made only in a shell (or in `~/.bashrc`) will not reach a running service until then.
 
 ## Options
 
@@ -155,6 +184,16 @@ wrapped so a failure can never surface out of the hook.
 - **Best-effort edit detection.** Edit tools are recognized by known names and, for custom tools, by their input
   schema. An unusual custom tool may not be detected.
 - **V2 only.** There is intentionally no V1 `server()` export.
+
+## Verified in a live OpenCode V2 session
+
+- The built-in `write` and `edit` tools are recognized as edits (ids `write`/`edit`, input key `filePath`), and both
+  trigger auto-check.
+- Auto-check appends a bounded findings summary to the tool result **content** (so the model sees it), with a
+  structured block also attached under `metadata.jevlint`.
+- The on-demand tool registers with effective id `jevlint_check` (namespace `jevlint`, name `check`).
+- A local `plugins` path must point at a directory containing `index.ts`; `package.json` `exports` is not consulted.
+- Credentials reach the plugin through the OpenCode service process environment, which is fixed at service start.
 
 ## Development
 

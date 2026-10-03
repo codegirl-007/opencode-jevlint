@@ -13,10 +13,10 @@ import { summarize, summarizeError } from "./summary"
 /**
  * Built-in edit tool names we recognize even before inspecting schemas.
  *
- * TODO(verify): exact built-in edit tool ids and their input field names. The
- * docs describe `ctx.tool.list()` but do not enumerate built-ins; these names
- * plus the schema fallback are defensive guesses, confirmed only against the
- * installed `@opencode/plugin`/schema types (which describe shapes, not ids).
+ * Verified in a live OpenCode V2 session: the built-in `write` tool reports id
+ * `write` with input key `filePath` and triggers the hook. The remaining names
+ * plus the schema fallback stay as defensive coverage for `edit`/multi-edit
+ * variants and custom tools.
  */
 export const KNOWN_EDIT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "edit",
@@ -263,9 +263,9 @@ export function shouldRegisterAutoCheck(
 /**
  * Merge a `jevlint` metadata block (and optional note) into a tool result.
  *
- * TODO(verify): whether `result.metadata` is surfaced to the model or only to
- * the UI. We also append the summary to `result.content` because that is the
- * documented tool output field and is definitely shown to the model.
+ * Verified in a live OpenCode V2 session: appending to `result.content` is what
+ * surfaces the summary to the model, so the note is always added there; the
+ * structured `metadata.jevlint` block is attached alongside it.
  */
 export function attachResultMetadata(
   result: unknown,
