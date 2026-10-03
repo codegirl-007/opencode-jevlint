@@ -167,6 +167,19 @@ bun test
 Tests use a fake `jevlint` shell script; they need no network access and no API keys. `test/fixtures/report.json`
 captures the `jevlint check --format json` contract.
 
+### Lint this repo with jevlint
+
+This repo ships a `jevlint.json` and dogfoods the tool on its own TypeScript:
+
+```sh
+bun run lint          # jevlint check .
+bun run lint:refresh  # ignore cached results
+```
+
+`jevlint` must be on `PATH` (or use the `binary` plugin option) and credentials must be in the environment:
+`TYPESAFE_API_KEY`, or `JEVLINT_PROVIDER=openrouter` with `OPENROUTER_API_KEY`. The bundled rules cover
+`src/**/*.ts`; add rules or a pack to widen coverage.
+
 ## License
 
 MIT

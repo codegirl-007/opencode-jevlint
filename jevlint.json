@@ -1,0 +1,21 @@
+{
+  "languages": {
+    "typescript": {}
+  },
+  "rules": [
+    {
+      "id": "swallowed-errors",
+      "description": "Fail errors or exceptions that are caught, ignored, or discarded without handling, logging, wrapping, or rethrowing. Intentional best-effort operations pass when the intent is clear.",
+      "severity": "error",
+      "kinds": ["function"],
+      "include": ["src/**/*.ts"]
+    },
+    {
+      "id": "unnecessary-complexity",
+      "description": "The code is not unnecessarily complicated.",
+      "severity": "warning",
+      "kinds": ["function", "type"],
+      "include": ["src/**/*.ts"]
+    }
+  ]
+}

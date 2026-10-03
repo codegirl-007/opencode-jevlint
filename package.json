@@ -36,7 +36,9 @@
   },
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "jevlint check .",
+    "lint:refresh": "jevlint check --refresh-cache ."
   },
   "dependencies": {
     "@opencode/plugin": "^2.0.22"
