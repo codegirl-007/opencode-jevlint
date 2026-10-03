@@ -1,0 +1,38 @@
+{
+  "name": "opencode-jevlint",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "OpenCode V2 plugin that wraps the jevlint CLI: an on-demand jevlint_check tool plus bounded auto-checks after edits.",
+  "license": "MIT",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "jevlint",
+    "lint",
+    "tree-sitter"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20",
+    "bun": ">=1.1"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode/plugin": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

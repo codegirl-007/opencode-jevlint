@@ -1,0 +1,52 @@
+{
+  "scannedFiles": 3,
+  "codeUnits": 12,
+  "evaluations": 24,
+  "findings": [
+    {
+      "ruleId": "no-todo-comments",
+      "description": "Do not leave TODO comments in committed code.",
+      "severity": "error",
+      "status": "open",
+      "path": "src/a.ts",
+      "language": "typescript",
+      "kind": "comment",
+      "name": "todo",
+      "startLine": 10,
+      "endLine": 10,
+      "startColumn": 3,
+      "endColumn": 24,
+      "snippet": "// TODO: remove this before merging",
+      "locations": [{ "path": "src/a.ts", "startLine": 10 }]
+    },
+    {
+      "ruleId": "prefer-early-return",
+      "description": "Prefer an early return over a deeply nested branch.",
+      "severity": "warning",
+      "status": "open",
+      "path": "src/b.ts",
+      "language": "typescript",
+      "kind": "function",
+      "name": "handle",
+      "startLine": 42,
+      "endLine": 58,
+      "startColumn": 1,
+      "endColumn": 2,
+      "snippet": "if (x) { if (y) { ... } }"
+    },
+    {
+      "ruleId": "descriptive-names",
+      "description": "Use descriptive variable names instead of single letters.",
+      "severity": "info",
+      "status": "open",
+      "path": "src/c.ts",
+      "language": "typescript",
+      "kind": "variable",
+      "name": "x",
+      "startLine": 7,
+      "endLine": 7,
+      "startColumn": 1,
+      "endColumn": 2
+    }
+  ]
+}
